@@ -224,7 +224,3 @@ Il sistema ha due livelli di protezione indipendenti per non lasciare mai i disc
 
 - **Lato ESP32:** se non riceve comandi per `WATCHDOG_MS` (30 s di default) — ad esempio per crash del container o cavo USB staccato — porta la ventola al 100% finché non torna un comando valido.
 - **Lato script:** se l'API non risponde o non fornisce temperature valide, invia `SAFE_DUTY` (100% di default) e tenta la riconnessione.
-
-## Licenza
-
-Rilascia il progetto sotto la licenza che preferisci (es. MIT). Aggiungi qui il file `LICENSE` corrispondente.
