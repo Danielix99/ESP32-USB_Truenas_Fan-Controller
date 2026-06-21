@@ -1,0 +1,36 @@
+services:
+  fan-control:
+    build: .
+    # In alternativa al build, puoi usare un'immagine python e installare i pacchetti
+    # via command, ma il build e' piu' pulito e veloce all'avvio.
+    container_name: fan-control
+    restart: unless-stopped
+
+    # Passa la seriale dell'ESP32 nel container.
+    # Verifica il device giusto sull'host con:  ls -l /dev/ttyUSB* /dev/ttyACM*
+    devices:
+      - "/dev/ttyUSB0:/dev/ttyUSB0"
+
+    # Permette al container di raggiungere l'host TrueNAS via host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    environment:
+      # --- Connessione API TrueNAS ---
+      TN_HOST: "host.docker.internal"   # o l'IP fisso di TrueNAS, es. 192.168.1.10
+      TN_PORT: "443"
+      TN_SSL: "true"
+      TN_APIKEY: "INCOLLA_QUI_LA_TUA_API_KEY"
+
+      # --- Dischi da monitorare (vuoto = tutti). Es: "sda,sdb" o "nvme0n1" ---
+      DISKS: ""
+
+      # --- Seriale ---
+      SERIAL_PORT: "/dev/ttyUSB0"
+      SERIAL_BAUD: "115200"
+
+      # --- Comportamento ---
+      INTERVAL: "10"
+      SAFE_DUTY: "100"
+      # Curva temp:duty (gradi C : percentuale)
+      CURVE: "30:20,40:30,50:50,60:75,70:100"
