@@ -6,8 +6,8 @@ Lo script gira in un container Docker su TrueNAS, legge le temperature dei disch
 
 ```
 ┌──────────────┐   API WebSocket    ┌──────────────┐   USB seriale   ┌──────────┐   PWM 25kHz   ┌────────┐
-│   TrueNAS    │ ◄───disk.temps───► │  Container    │ ───"S<pct>"───► │  ESP32   │ ────────────► │ Ventola│
-│   SCALE      │                    │  fan_control  │ ◄───"RPM n"──── │          │ ◄───tacho──── │ 4-pin  │
+│   TrueNAS    │ ◄───disk.temps───► │  Container   │ ───"S<pct>"───► │  ESP32   │ ────────────► │ Ventola│
+│   SCALE      │                    │  fan_control │ ◄───"RPM n"──── │          │ ◄───tacho──── │ 4-pin  │
 └──────────────┘                    └──────────────┘                 └──────────┘               └────────┘
 ```
 
