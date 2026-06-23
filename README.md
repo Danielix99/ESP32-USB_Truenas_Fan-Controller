@@ -51,7 +51,8 @@ Il sistema ha due componenti che comunicano su una semplice seriale USB.
 **Hardware**
 
 - Una scheda ESP32 (qualsiasi modello con USB).
-- Una ventola PWM **4-pin** (questo progetto è pensato per 5V; vale anche per ventole 12V cambiando solo l'alimentazione).
+- Una ventola PWM **4-pin** (questo progetto è pensato per 5V ma è stato usato con successo con ventole a 12V).
+- Un condensatore ceramico da circa 10nF da collegare tra Tach e GND (Serve a filtrare il segnale di spuria del PWM che rientra nel Tach su molti ESP32)
 - Un'alimentazione adeguata per la ventola (vedi sotto).
 - Un cavo USB tra ESP32 e il server TrueNAS.
 
@@ -77,11 +78,11 @@ Collegamenti all'ESP32:
 
 ### Note importanti sul cablaggio
 
-**Alimentazione.** Non alimentare la ventola dal pin 5V dell'ESP32 se assorbe più di ~100–200 mA: usa un'alimentazione 5V esterna (o il 5V del PC/USB) e collega la massa in comune con l'ESP32. Senza massa comune il segnale non funziona.
+**Alimentazione.** Non alimentare la ventola dal pin 5V dell'ESP32: usa un'alimentazione esterna (5V del PC/USB, 12V da alimentazione dischi Molex) e collega la massa in comune con l'ESP32. Senza massa comune il segnale potrebbe non funzionare.
 
-**Filo tacho e pull-up a 3.3V.** Il filo tacho è di tipo open-collector: internamente è un interruttore verso massa che si chiude due volte per giro. Per leggerlo serve un pull-up. **Deve essere riferito a 3.3V, mai a 5V**, perché i GPIO dell'ESP32 non sono 5V-tolerant e potrebbero danneggiarsi. Lo sketch usa il pull-up interno dell'ESP32 (`INPUT_PULLUP`, collegato ai 3.3V interni), quindi puoi collegare il filo tacho **direttamente** al GPIO 26 senza componenti esterni. Se il segnale risultasse instabile, aggiungi una resistenza esterna da ~10 kΩ tra il filo tacho e il pin **3.3V**.
+**Filo tacho e pull-up a 3.3V.** Il filo tacho è di tipo open-collector: internamente è un interruttore verso massa che si chiude due volte per giro. Per leggerlo serve un pull-up. **Deve essere riferito a 3.3V, mai a 5V**, perché i GPIO dell'ESP32 non sono 5V-tolerant e potrebbero danneggiarsi. Lo sketch usa il pull-up interno dell'ESP32 (`INPUT_PULLUP`, collegato ai 3.3V interni), quindi puoi collegare il filo tacho **direttamente** al GPIO 26 senza componenti esterni. Se il segnale risultasse instabile, aggiungi una resistenza esterna da ~10 kΩ tra il filo tacho e il pin **3.3V**. Collegare un condensatore ceramico da circa 10nF tra Tach e GND per assicurar euna corretta lettura degli RPM.
 
-**Livelli PWM.** Il segnale PWM dell'ESP32 è a 3.3V mentre lo standard delle ventole lo specifica a 5V. Nella stragrande maggioranza dei casi la ventola accetta comunque i 3.3V; se la tua non risponde, interponi un level shifter sul filo blu.
+**Livelli PWM.** Il segnale PWM dell'ESP32 è a 3.3V mentre lo standard delle ventole lo specifica a 5V/12V. Nella stragrande maggioranza dei casi la ventola accetta comunque i 3.3V; se la tua non risponde, interponi un level shifter sul filo blu.
 
 ## Setup ESP32
 
@@ -224,3 +225,12 @@ Il sistema ha due livelli di protezione indipendenti per non lasciare mai i disc
 
 - **Lato ESP32:** se non riceve comandi per `WATCHDOG_MS` (30 s di default) — ad esempio per crash del container o cavo USB staccato — porta la ventola al 100% finché non torna un comando valido.
 - **Lato script:** se l'API non risponde o non fornisce temperature valide, invia `SAFE_DUTY` (100% di default) e tenta la riconnessione.
+
+
+## TODO
+Progetto in lavorazione con sviluppi da proseguire:
+
+- Aggiungere Webserver
+- Aggiungere WebUI
+- Controllo della curva e della ventola direttamente tramite GUI
+- Pilotaggio ventola basato anche su feedback RPM 
