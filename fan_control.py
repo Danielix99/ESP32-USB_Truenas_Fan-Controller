@@ -1,17 +1,3 @@
-# Copyright (C) 2026  Daniele Rossi
-#
-#    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU General Public License as published by
-#    the Free Software Foundation, either version 3 of the License, or
-#    (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU General Public License for more details.
-#
-#    You should have received a copy of the GNU General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #!/usr/bin/env python3
 """
 Controllo ventola ESP32 basato sulla temperatura disco di TrueNAS SCALE (25.04+).
@@ -46,6 +32,11 @@ DISKS = [d.strip() for d in os.environ.get("DISKS", "").split(",") if d.strip()]
 SERIAL_PORT = os.environ.get("SERIAL_PORT", "/dev/ttyUSB0")
 SERIAL_BAUD = int(os.environ.get("SERIAL_BAUD", "115200"))
 INTERVAL    = int(os.environ.get("INTERVAL", "10"))           # secondi tra i cicli
+
+# Reinvia il duty cycle almeno ogni KEEPALIVE secondi anche se non cambia,
+# per evitare che il watchdog dell'ESP32 (timeout ~30s) mandi la ventola al 100%.
+# Deve essere minore del timeout dell'ESP32.
+KEEPALIVE   = int(os.environ.get("KEEPALIVE", "15"))
 
 # Curva: lista "temp:duty" separata da virgola. Esempio: "30:20,40:30,50:50,60:75,70:100"
 def parse_curve(s):
@@ -148,6 +139,7 @@ def main():
     tn.connect()
 
     last_duty = None
+    last_sent = 0.0
     while True:
         try:
             temps = tn.disk_temperatures(DISKS)  # dict {disk: temp_o_None}
@@ -169,11 +161,14 @@ def main():
                 log(f"Riconnessione fallita: {e2}")
             duty = SAFE_DUTY
 
-        # invia solo se cambiato (riduce traffico seriale)
-        if duty != last_duty:
+        # invia se cambiato oppure se e' passato troppo tempo (keepalive),
+        # cosi' il watchdog dell'ESP32 non manda la ventola al 100%
+        now = time.monotonic()
+        if duty != last_duty or (now - last_sent) >= KEEPALIVE:
             try:
                 ser.write(f"S{duty}\n".encode())
                 last_duty = duty
+                last_sent = now
             except Exception as e:
                 log(f"Errore scrittura seriale: {e} -> riapro porta")
                 try:
