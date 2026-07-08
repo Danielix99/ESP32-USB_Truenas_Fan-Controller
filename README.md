@@ -1,148 +1,148 @@
 # ESP32 Disk-Temp Fan Controller for TrueNAS
 
-Controllo della velocità di una ventola PWM 4-pin tramite ESP32, pilotato dalla temperatura dei dischi di un server **TrueNAS SCALE**.
+PWM speed control of a 4-pin fan via an ESP32, driven by the disk temperatures of a **TrueNAS SCALE** server.
 
-Lo script gira in un container Docker su TrueNAS, legge le temperature dei dischi tramite l'API ufficiale e invia all'ESP32 (via USB seriale) la percentuale di velocità calcolata da una curva configurabile. L'ESP32 traduce quella percentuale in un segnale PWM a 25 kHz e legge in tempo reale gli RPM della ventola.
+The script runs in a Docker container on TrueNAS, reads the disk temperatures through the official API, and sends the ESP32 (over USB serial) the speed percentage computed from a configurable curve. The ESP32 translates that percentage into a 25 kHz PWM signal and reads the fan's RPM in real time.
 
 ```
-┌──────────────┐   API WebSocket    ┌──────────────┐   USB seriale   ┌──────────┐   PWM 25kHz   ┌────────┐
-│   TrueNAS    │ ◄───disk.temps───► │  Container   │ ───"S<pct>"───► │  ESP32   │ ────────────► │ Ventola│
+┌──────────────┐   API WebSocket    ┌──────────────┐   USB serial    ┌──────────┐   PWM 25kHz   ┌────────┐
+│   TrueNAS    │ ◄───disk.temps───► │  Container   │ ───"S<pct>"───► │  ESP32   │ ────────────► │  Fan   │
 │   SCALE      │                    │  fan_control │ ◄───"RPM n"──── │          │ ◄───tacho──── │ 4-pin  │
 └──────────────┘                    └──────────────┘                 └──────────┘               └────────┘
 ```
 
-## Indice
+## Contents
 
-- [Come funziona](#come-funziona)
-- [Requisiti](#requisiti)
-- [Hardware e cablaggio](#hardware-e-cablaggio)
-- [Setup ESP32](#setup-esp32)
-- [Setup TrueNAS](#setup-truenas)
-- [Configurazione](#configurazione)
-- [Verifica e troubleshooting](#verifica-e-troubleshooting)
-- [Protocollo seriale](#protocollo-seriale)
-- [Sicurezza (failsafe)](#sicurezza-failsafe)
+- [How it works](#how-it-works)
+- [Requirements](#requirements)
+- [Hardware and wiring](#hardware-and-wiring)
+- [ESP32 setup](#esp32-setup)
+- [TrueNAS setup](#truenas-setup)
+- [Configuration](#configuration)
+- [Verification and troubleshooting](#verification-and-troubleshooting)
+- [Serial protocol](#serial-protocol)
+- [Safety (failsafe)](#safety-failsafe)
 
-## Come funziona
+## How it works
 
-Il sistema ha due componenti che comunicano su una semplice seriale USB.
+The system has two components that communicate over a simple USB serial link.
 
-**Lato TrueNAS (`fan_control.py`, in container Docker)**
+**TrueNAS side (`fan_control.py`, in a Docker container)**
 
-1. Si connette all'API JSON-RPC 2.0 over WebSocket di TrueNAS (`wss://host/api/current`) e si autentica con una API key.
-2. Ogni `INTERVAL` secondi chiama il metodo `disk.temperatures` per ottenere le temperature dei dischi.
-3. Prende la temperatura più alta tra i dischi monitorati e la converte in una percentuale di velocità tramite una **curva configurabile** (interpolazione lineare tra i punti).
-4. Invia la percentuale all'ESP32 sulla seriale, ma solo quando cambia, per ridurre il traffico.
-5. Legge le risposte e gli RPM riportati dall'ESP32 e li registra nei log.
+1. Connects to TrueNAS's JSON-RPC 2.0 over WebSocket API (`wss://host/api/current`) and authenticates with an API key.
+2. Every `INTERVAL` seconds it calls the `disk.temperatures` method to get the disk temperatures.
+3. It takes the highest temperature among the monitored disks and converts it into a speed percentage via a **configurable curve** (linear interpolation between points).
+4. It sends the percentage to the ESP32 over serial, but only when it changes, to reduce traffic.
+5. It reads the responses and the RPM reported by the ESP32 and records them in the logs.
 
-**Lato ESP32 (`esp32_fan_control.ino`)**
+**ESP32 side (`esp32_fan_control.ino`)**
 
-1. Riceve la percentuale dalla seriale e genera un segnale PWM a 25 kHz (standard per ventole 4-pin) sul pin di controllo.
-2. Conta gli impulsi del filo tacho della ventola tramite interrupt e calcola gli RPM una volta al secondo, inviandoli sulla seriale.
-3. Include un **failsafe**: se non riceve comandi per 30 secondi, porta la ventola al 100%.
+1. Receives the percentage over serial and generates a 25 kHz PWM signal (standard for 4-pin fans) on the control pin.
+2. Counts the fan's tacho wire pulses via interrupt and computes the RPM once per second, sending them over serial.
+3. Includes a **failsafe**: if it receives no commands for 30 seconds, it brings the fan to 100%.
 
-## Requisiti
+## Requirements
 
 **Software**
 
-- TrueNAS SCALE **25.04 (Fangtooth) o successivo** (usa la nuova API WebSocket; le versioni precedenti con la vecchia REST API non sono supportate da questo script senza modifiche).
-- Arduino IDE (o PlatformIO) con il core **Arduino-ESP32** installato. Lo sketch è compatibile sia con il core 2.x sia con il 3.x.
+- TrueNAS SCALE **25.04 (Fangtooth) or later** (uses the new WebSocket API; earlier versions with the old REST API are not supported by this script without modifications).
+- Arduino IDE (or PlatformIO) with the **Arduino-ESP32** core installed. The sketch is compatible with both the 2.x and 3.x core.
 
 **Hardware**
 
-- Una scheda ESP32 (qualsiasi modello con USB).
-- Una ventola PWM **4-pin** (questo progetto è pensato per 5V ma è stato usato con successo con ventole a 12V).
-- Un condensatore ceramico da circa 10nF da collegare tra Tach e GND (Serve a filtrare il segnale di spuria del PWM che rientra nel Tach su molti ESP32)
-- Un'alimentazione adeguata per la ventola (vedi sotto).
-- Un cavo USB tra ESP32 e il server TrueNAS.
+- An ESP32 board (any model with USB).
+- A **4-pin** PWM fan (this project is designed for 5V but has been used successfully with 12V fans).
+- A ceramic capacitor of about 10nF to connect between Tach and GND (it filters out the PWM spurious signal that couples back into the Tach on many ESP32s).
+- An adequate power supply for the fan (see below).
+- A USB cable between the ESP32 and the TrueNAS server.
 
-## Hardware e cablaggio
+## Hardware and wiring
 
-Una ventola 4-pin ha questi fili:
+A 4-pin fan has these wires:
 
-| Filo | Colore tipico | Funzione |
+| Wire | Typical color | Function |
 |------|---------------|----------|
-| GND | Nero | Massa |
-| +V | Giallo/Rosso | Alimentazione |
-| Tacho | Verde | Segnale RPM (open-collector) |
-| PWM | Blu | Controllo velocità |
+| GND | Black | Ground |
+| +V | Yellow/Red | Power |
+| Tacho | Green | RPM signal (open-collector) |
+| PWM | Blue | Speed control |
 
-Collegamenti all'ESP32:
+Connections to the ESP32:
 
-| Filo ventola | Collegamento |
-|--------------|--------------|
-| GND | GND dell'ESP32 **e** del'alimentazione (massa comune obbligatoria) |
-| +V (5V) | Alimentazione 5V esterna |
-| PWM (blu) | GPIO 25 |
-| Tacho (verde) | GPIO 26 |
+| Fan wire | Connection |
+|----------|------------|
+| GND | ESP32 GND **and** power supply GND (common ground required) |
+| +V (5V) | External 5V power supply |
+| PWM (blue) | GPIO 25 |
+| Tacho (green) | GPIO 26 |
 
-### Note importanti sul cablaggio
+### Important wiring notes
 
-**Alimentazione.** Non alimentare la ventola dal pin 5V dell'ESP32: usa un'alimentazione esterna (5V del PC/USB, 12V da alimentazione dischi Molex) e collega la massa in comune con l'ESP32. Senza massa comune il segnale potrebbe non funzionare.
+**Power.** Do not power the fan from the ESP32's 5V pin: use an external power supply (5V from the PC/USB, 12V from a disk Molex connector) and share the ground with the ESP32. Without a common ground the signal may not work.
 
-**Filo tacho e pull-up a 3.3V.** Il filo tacho è di tipo open-collector: internamente è un interruttore verso massa che si chiude due volte per giro. Per leggerlo serve un pull-up. **Deve essere riferito a 3.3V, mai a 5V**, perché i GPIO dell'ESP32 non sono 5V-tolerant e potrebbero danneggiarsi. Lo sketch usa il pull-up interno dell'ESP32 (`INPUT_PULLUP`, collegato ai 3.3V interni), quindi puoi collegare il filo tacho **direttamente** al GPIO 26 senza componenti esterni. Se il segnale risultasse instabile, aggiungi una resistenza esterna da ~10 kΩ tra il filo tacho e il pin **3.3V**. Collegare un condensatore ceramico da circa 10nF tra Tach e GND per assicurar euna corretta lettura degli RPM.
+**Tacho wire and 3.3V pull-up.** The tacho wire is open-collector: internally it is a switch to ground that closes twice per revolution. To read it you need a pull-up. **It must be referenced to 3.3V, never to 5V**, because the ESP32 GPIOs are not 5V-tolerant and could be damaged. The sketch uses the ESP32's internal pull-up (`INPUT_PULLUP`, connected to the internal 3.3V), so you can connect the tacho wire **directly** to GPIO 26 without external components. If the signal turns out unstable, add an external ~10 kΩ resistor between the tacho wire and the **3.3V** pin. Connect a ceramic capacitor of about 10nF between Tach and GND to ensure correct RPM readings.
 
-**Livelli PWM.** Il segnale PWM dell'ESP32 è a 3.3V mentre lo standard delle ventole lo specifica a 5V/12V. Nella stragrande maggioranza dei casi la ventola accetta comunque i 3.3V; se la tua non risponde, interponi un level shifter sul filo blu.
+**PWM levels.** The ESP32's PWM signal is 3.3V, whereas the fan standard specifies 5V/12V. In the vast majority of cases the fan accepts 3.3V anyway; if yours does not respond, insert a level shifter on the blue wire.
 
-## Setup ESP32
+## ESP32 setup
 
-1. Apri `esp32_fan_control.ino` in Arduino IDE.
-2. Seleziona la tua scheda ESP32 e la porta corretta.
-3. Carica lo sketch. Non serve scegliere la versione del core: lo sketch rileva da solo se usare le API LEDC del core 2.x o 3.x.
-4. (Opzionale) Apri il Serial Monitor a **115200 baud** per verificare il funzionamento prima di collegare TrueNAS.
+1. Open `esp32_fan_control.ino` in the Arduino IDE.
+2. Select your ESP32 board and the correct port.
+3. Upload the sketch. You do not need to choose the core version: the sketch auto-detects whether to use the 2.x or 3.x core's LEDC APIs.
+4. (Optional) Open the Serial Monitor at **115200 baud** to verify operation before connecting TrueNAS.
 
-Parametri modificabili in cima allo sketch:
+Parameters you can change at the top of the sketch:
 
-| Costante | Default | Descrizione |
+| Constant | Default | Description |
 |----------|---------|-------------|
-| `PWM_PIN` | 25 | GPIO del segnale PWM |
-| `TACHO_PIN` | 26 | GPIO del segnale tacho |
-| `PWM_FREQ` | 25000 | Frequenza PWM in Hz |
-| `PULSES_PER_REV` | 2 | Impulsi tacho per giro (alcune ventole: 1 o 4) |
-| `WATCHDOG_MS` | 30000 | Tempo senza comandi prima del failsafe al 100% |
+| `PWM_PIN` | 25 | GPIO of the PWM signal |
+| `TACHO_PIN` | 26 | GPIO of the tacho signal |
+| `PWM_FREQ` | 25000 | PWM frequency in Hz |
+| `PULSES_PER_REV` | 2 | Tacho pulses per revolution (some fans: 1 or 4) |
+| `WATCHDOG_MS` | 30000 | Time without commands before the failsafe to 100% |
 
-## Setup TrueNAS
+## TrueNAS setup
 
-### 1. Crea una API key
+### 1. Create an API key
 
-Nella web UI di TrueNAS: **Settings → API Keys → Add**. Dai un nome (es. `fan-control`) e **copia subito la chiave** (viene mostrata una sola volta).
+In the TrueNAS web UI: **Settings → API Keys → Add**. Give it a name (e.g. `fan-control`) and **copy the key immediately** (it is shown only once).
 
-### 2. Trova la porta seriale dell'ESP32
+### 2. Find the ESP32's serial port
 
-Dalla Shell di TrueNAS:
+From the TrueNAS Shell:
 
 ```bash
 ls -l /dev/ttyUSB* /dev/ttyACM*
 ```
 
-Tipicamente è `/dev/ttyUSB0` (chip CP210x/CH340) o `/dev/ttyACM0` (USB nativo). Annota il valore: serve sia nel `docker-compose.yml` (sezione `devices`) sia nella variabile `SERIAL_PORT`.
+Typically it is `/dev/ttyUSB0` (CP210x/CH340 chip) or `/dev/ttyACM0` (native USB). Note the value: you need it both in the `docker-compose.yml` (the `devices` section) and in the `SERIAL_PORT` variable.
 
-### 3. Copia i file su un pool
+### 3. Copy the files to a pool
 
-Crea una cartella su un tuo pool (dato che il filesystem di sistema è read-only e viene azzerato dagli aggiornamenti) e copiaci i tre file `fan_control.py`, `Dockerfile`, `docker-compose.yml`:
+Create a folder on one of your pools (since the system filesystem is read-only and is wiped by updates) and copy the three files `fan_control.py`, `Dockerfile`, `docker-compose.yml` into it:
 
 ```bash
 mkdir -p /mnt/tank/scripts/fan
-# copia qui i file (scp, share SMB, git clone, ecc.)
+# copy the files here (scp, SMB share, git clone, etc.)
 ```
 
-Sostituisci `tank` con il nome del tuo pool.
+Replace `tank` with the name of your pool.
 
-### 4. Configura il compose
+### 4. Configure the compose
 
-Apri `docker-compose.yml` e imposta almeno:
+Open `docker-compose.yml` and set at least:
 
-- `TN_APIKEY` → la API key creata al punto 1
-- `devices` e `SERIAL_PORT` → la porta trovata al punto 2
-- `DISKS` → i dischi da monitorare, oppure lascia vuoto per tutti
+- `TN_APIKEY` → the API key created in step 1
+- `devices` and `SERIAL_PORT` → the port found in step 2
+- `DISKS` → the disks to monitor, or leave empty for all
 
-### 5. Avvia la Custom App
+### 5. Start the Custom App
 
-Due modi.
+Two ways.
 
-**Via UI:** **Apps → Discover Apps → Custom App** e incolla il contenuto del compose.
+**Via UI:** **Apps → Discover Apps → Custom App** and paste the contents of the compose.
 
-**Via Shell (build dell'immagine):**
+**Via Shell (building the image):**
 
 ```bash
 cd /mnt/tank/scripts/fan
@@ -150,87 +150,87 @@ docker build -t fan-control .
 docker compose up -d
 ```
 
-> Nota: se usi l'installazione "via YAML" dalla UI, la direttiva `build: .` potrebbe non trovare il `Dockerfile`. In quel caso costruisci prima l'immagine con `docker build -t fan-control /mnt/tank/scripts/fan`, poi nel compose sostituisci `build: .` con `image: fan-control`.
+> Note: if you use the "via YAML" installation from the UI, the `build: .` directive may not find the `Dockerfile`. In that case build the image first with `docker build -t fan-control /mnt/tank/scripts/fan`, then in the compose replace `build: .` with `image: fan-control`.
 
-## Configurazione
+## Configuration
 
-Tutte le opzioni si impostano tramite variabili d'ambiente nel `docker-compose.yml`.
+All options are set through environment variables in `docker-compose.yml`.
 
-| Variabile | Default | Descrizione |
-|-----------|---------|-------------|
-| `TN_HOST` | `host.docker.internal` | Host di TrueNAS. In alternativa l'IP fisso del NAS. |
-| `TN_PORT` | `443` | Porta dell'API. |
-| `TN_SSL` | `true` | Usa `wss://` (TLS). Il certificato self-signed non viene verificato. |
-| `TN_APIKEY` | *(vuoto)* | **Obbligatoria.** API key creata nella UI. |
-| `DISKS` | *(vuoto)* | Dischi da monitorare separati da virgola (es. `sda,sdb`). Vuoto = tutti. |
-| `SERIAL_PORT` | `/dev/ttyUSB0` | Device seriale dell'ESP32. |
-| `SERIAL_BAUD` | `115200` | Baud rate (deve combaciare con lo sketch). |
-| `INTERVAL` | `10` | Secondi tra una lettura e l'altra. |
-| `SAFE_DUTY` | `100` | Velocità % usata se la temperatura non è leggibile. |
-| `CURVE` | `30:20,40:30,50:50,60:75,70:100` | Curva `temp:percentuale`, vedi sotto. |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TN_HOST` | `host.docker.internal` | TrueNAS host. Alternatively, the NAS's fixed IP. |
+| `TN_PORT` | `443` | API port. |
+| `TN_SSL` | `true` | Use `wss://` (TLS). The self-signed certificate is not verified. |
+| `TN_APIKEY` | *(empty)* | **Required.** API key created in the UI. |
+| `DISKS` | *(empty)* | Disks to monitor, comma-separated (e.g. `sda,sdb`). Empty = all. |
+| `SERIAL_PORT` | `/dev/ttyUSB0` | ESP32 serial device. |
+| `SERIAL_BAUD` | `115200` | Baud rate (must match the sketch). |
+| `INTERVAL` | `10` | Seconds between readings. |
+| `SAFE_DUTY` | `100` | Speed % used if the temperature can't be read. |
+| `CURVE` | `30:20,40:30,50:50,60:75,70:100` | `temp:percentage` curve, see below. |
 
-### La curva di velocità
+### The speed curve
 
-La curva è una lista di punti `temperatura:percentuale` separati da virgola. Con il default:
+The curve is a comma-separated list of `temperature:percentage` points. With the default:
 
-| Temp disco | Velocità ventola |
-|------------|------------------|
+| Disk temp | Fan speed |
+|-----------|-----------|
 | ≤ 30 °C | 20 % |
 | 40 °C | 30 % |
 | 50 °C | 50 % |
 | 60 °C | 75 % |
 | ≥ 70 °C | 100 % |
 
-Tra un punto e l'altro la velocità viene interpolata linearmente. Sotto il primo punto resta al minimo, sopra l'ultimo resta al massimo. Adatta i valori al tuo hardware e al rumore che tolleri.
+Between one point and the next the speed is linearly interpolated. Below the first point it stays at the minimum, above the last point it stays at the maximum. Adjust the values to your hardware and the noise you can tolerate.
 
-## Verifica e troubleshooting
+## Verification and troubleshooting
 
-**Test manuale dell'ESP32.** Con il Serial Monitor a 115200 baud, invia `S0`, `S50`, `S100`: dovresti vedere `OK S...` e la ventola cambiare velocità, più un flusso `RPM ...` ogni secondo.
+**Manual ESP32 test.** With the Serial Monitor at 115200 baud, send `S0`, `S50`, `S100`: you should see `OK S...` and the fan changing speed, plus an `RPM ...` stream every second.
 
-**RPM sbagliati (doppi o dimezzati).** Aggiusta `PULSES_PER_REV` nello sketch (prova 1 o 4 invece di 2).
+**Wrong RPM (doubled or halved).** Adjust `PULSES_PER_REV` in the sketch (try 1 or 4 instead of 2).
 
-**Log del container.** Dalla UI nella pagina dell'app, oppure:
+**Container logs.** From the UI on the app's page, or:
 
 ```bash
 docker logs -f fan-control
 ```
 
-Ad ogni ciclo lo script stampa le temperature grezze lette dall'API: utile per capire i nomi esatti dei dischi da mettere in `DISKS`.
+On each cycle the script prints the raw temperatures read from the API: useful for figuring out the exact disk names to put in `DISKS`.
 
-**Il container non raggiunge TrueNAS.** Se `host.docker.internal` non funziona, sostituisci `TN_HOST` con l'IP fisso del NAS nella stessa LAN.
+**The container can't reach TrueNAS.** If `host.docker.internal` doesn't work, replace `TN_HOST` with the NAS's fixed IP on the same LAN.
 
-**Nessuna temperatura valida.** Lo script mette la ventola a `SAFE_DUTY` (100% di default) e tenta la riconnessione all'API. Controlla che la API key sia valida e che i nomi in `DISKS` corrispondano a quelli nei log.
+**No valid temperature.** The script sets the fan to `SAFE_DUTY` (100% by default) and attempts to reconnect to the API. Check that the API key is valid and that the names in `DISKS` match those in the logs.
 
-## Protocollo seriale
+## Serial protocol
 
-Comunicazione testuale, terminata da newline, a 115200 baud.
+Text-based communication, newline-terminated, at 115200 baud.
 
-**Dal controller all'ESP32:**
+**From the controller to the ESP32:**
 
-| Comando | Effetto |
+| Command | Effect |
+|---------|--------|
+| `S<0-100>\n` | Set the speed as a percentage (e.g. `S75`). |
+
+**From the ESP32 to the controller:**
+
+| Message | Meaning |
 |---------|---------|
-| `S<0-100>\n` | Imposta la velocità in percentuale (es. `S75`). |
+| `READY` | Sent once at startup. |
+| `OK S<pct>` | Acknowledgment of a received command. |
+| `RPM <n>` | Measured fan speed, once per second. |
 
-**Dall'ESP32 al controller:**
+## Safety (failsafe)
 
-| Messaggio | Significato |
-|-----------|-------------|
-| `READY` | Inviato una volta all'avvio. |
-| `OK S<pct>` | Conferma di un comando ricevuto. |
-| `RPM <n>` | Velocità misurata della ventola, una volta al secondo. |
+The system has two independent protection layers to never leave the disks without cooling:
 
-## Sicurezza (failsafe)
-
-Il sistema ha due livelli di protezione indipendenti per non lasciare mai i dischi senza raffreddamento:
-
-- **Lato ESP32:** se non riceve comandi per `WATCHDOG_MS` (30 s di default) — ad esempio per crash del container o cavo USB staccato — porta la ventola al 100% finché non torna un comando valido.
-- **Lato script:** se l'API non risponde o non fornisce temperature valide, invia `SAFE_DUTY` (100% di default) e tenta la riconnessione.
+- **ESP32 side:** if it receives no commands for `WATCHDOG_MS` (30 s by default) — for example due to a container crash or an unplugged USB cable — it brings the fan to 100% until a valid command returns.
+- **Script side:** if the API doesn't respond or doesn't provide valid temperatures, it sends `SAFE_DUTY` (100% by default) and attempts to reconnect.
 
 
 ## TODO
-Progetto in lavorazione con sviluppi da proseguire:
+Work in progress with developments still to come:
 
-- Aggiungere Webserver
-- Aggiungere WebUI
-- Controllo della curva e della ventola direttamente tramite GUI
-- Pilotaggio ventola basato anche su feedback RPM 
+- Add a web server
+- Add a WebUI
+- Control the curve and the fan directly through the GUI
+- Fan control based also on RPM feedback
